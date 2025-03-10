@@ -1,0 +1,38 @@
+{
+  "trainer_base_lr": 1e-4,
+  "trainer_weight_decay": 3,
+  "trainer_epoch": 20,
+  "trainer_early_stopping_epoch": 10,
+  "trainer_early_stopping_metric": "macro_f1",
+  "trainer_batchsize": 512,
+  "trainer_samplesize": "label_max_count",
+  "trainer_extractor_tuning_lr": 1e-5,
+  "trainer_classifier_tuning_lr": 1e-4,
+  "trainer_tuning_new_samplesize": 500,
+  "trainer_old_data_sample_method": "uniform",
+  "trainer_tuning_old_uniform_samplesize": 2000,
+  "trainer_tuning_old_balance_samplesize": 500,
+  "trainer_onnx_saving_batch_size": 1,
+  "trainer_dropout_feature": 0.5,
+  "trainer_dropout_hidden": 0.3,
+  "trainer_cpu_cores": 16,
+
+  "arch_channels": [16, 16, 16],
+  "arch_hidden_range": 4,
+  "Area": 2,
+  "Field": 2,
+  "AreaCluster": [0, 1],
+  "FieldCluster": [0, 1, 2],
+
+  "eval_target_others_recall": 0.95,
+  "eval_target_others_recall_level": "flow",
+
+  "simhash_del_times": 1,
+  "simhash_class_min_dist": 999,
+  "simhash_nearby_min_dist": 0,
+  "simhash_over_filter_threshold": 0.5,
+  "simhash_min_samplesize": 1000,
+  "simhash_window_size": 32,
+
+  "device": "cpu"
+}
