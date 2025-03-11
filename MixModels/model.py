@@ -36,30 +36,36 @@ class Model(nn.Module):
         self.feature_dim = input_dim['feature_dim']  # SeqLen
         self.dropout1 = nn.Dropout(config["trainer_dropout_feature"])
         self.dropout2 = nn.Dropout(config["trainer_dropout_hidden"])
+        self.dtype = torch.float
 
         # Transformer
         # 定义 Transformer 编码器
         encoder_layer = nn.TransformerEncoderLayer(d_model=self.hidden_dim, nhead=self.hidden_dim,
-                                                   dim_feedforward=self.hidden_dim * self.feature_dim)
+                                                   dim_feedforward=self.hidden_dim * self.feature_dim,
+                                                   dtype=self.dtype)
         self.transformer_encoder = nn.TransformerEncoder(encoder_layer, num_layers=2)
-        self.embed = nn.Linear(self.hidden_dim, self.hidden_dim * self.feature_dim, bias=True)
+        self.embed = nn.Linear(self.hidden_dim, self.hidden_dim * self.feature_dim, bias=True, dtype=self.dtype)
         # 定义 Transformer 解码器
         decoder_layer = nn.TransformerDecoderLayer(d_model=self.hidden_dim * self.feature_dim, nhead=self.feature_dim,
-                                                   dim_feedforward=self.hidden_dim * self.feature_dim)
+                                                   dim_feedforward=self.hidden_dim * self.feature_dim,
+                                                   dtype=self.dtype)
         self.transformer_decoder = nn.TransformerDecoder(decoder_layer, num_layers=2)
 
         # Models
         self.Cnn = ConvNet(self.hidden_dim, [2, 1],
-                           [self.hidden_dim * self.feature_dim, self.hidden_dim * self.feature_dim], [1, 1])
-        self.Rnn = RecNet(self.hidden_dim, self.hidden_dim * self.feature_dim)
+                           [self.hidden_dim * self.feature_dim, self.hidden_dim * self.feature_dim], [1, 1],
+                           dtype=self.dtype)
+        self.Rnn = RecNet(self.hidden_dim, self.hidden_dim * self.feature_dim, dtype=self.dtype)
         self.ResSeqLen = self.Cnn.output_seqlen(self.feature_dim) + self.feature_dim
 
-        self.TF = Transformer(self.hidden_dim * self.feature_dim, self.hidden_dim * self.feature_dim, 2, 2)
-        self.fc = nn.Linear(self.hidden_dim * self.feature_dim * self.ResSeqLen, self.hidden_dim, bias=True)
+        self.TF = Transformer(self.hidden_dim * self.feature_dim, self.hidden_dim * self.feature_dim, 2, 2,
+                              dtype=self.dtype)
+        self.fc = nn.Linear(self.hidden_dim * self.feature_dim * self.ResSeqLen, self.hidden_dim, bias=True,
+                            dtype=self.dtype)
 
         # FC classifier.
-        self.output = nn.Linear(self.hidden_dim, self.output_dim, bias=False)
-        self.bn = nn.BatchNorm1d(self.hidden_dim * self.feature_dim)
+        self.output = nn.Linear(self.hidden_dim, self.output_dim, bias=False, dtype=self.dtype)
+        self.bn = nn.BatchNorm1d(self.hidden_dim * self.feature_dim, dtype=self.dtype)
         self.relu = nn.ReLU()
 
         # cosine classifier
@@ -88,9 +94,10 @@ class Model(nn.Module):
         # batch, feature, seq, cluster_dim, cyc
         x, env = x_env
         x = x[..., 1:]
-        x = torch.concat((x, env), axis=1)
+        x = torch.nan_to_num(x, nan=0.0, posinf=0.0, neginf=0.0)
+        x = torch.concat((x, env), axis=1).to(self.dtype)
         # Transformer
-        src_mask = nn.Transformer.generate_square_subsequent_mask(self.feature_dim).type(torch.bool)
+        src_mask = nn.Transformer.generate_square_subsequent_mask(self.feature_dim, dtype=torch.bool)
         src_key_padding_mask = torch.zeros(x.shape[0], self.feature_dim, dtype=torch.bool)
         memory_key_padding_mask = torch.zeros(x.shape[0], self.feature_dim, dtype=torch.bool)
         tgt_mask = nn.Transformer.generate_square_subsequent_mask(self.ResSeqLen).type(torch.bool)
@@ -98,6 +105,7 @@ class Model(nn.Module):
         TFencoded = (
             self.transformer_encoder(x.permute(2, 0, 1), mask=src_mask,
                                      src_key_padding_mask=src_key_padding_mask)).permute(1, 2, 0)
+
         TFencoded = (self.embed(TFencoded.permute(0, 2, 1))).permute(0, 2, 1)
         hidden = self.dropout1(x)
         # Models
@@ -106,13 +114,14 @@ class Model(nn.Module):
 
         TFsrc = torch.concat((CnnRes, RnnRes), axis=2)
 
-        TFdecoded = (self.transformer_decoder(TFsrc.permute(2, 0, 1), TFencoded.permute(2, 0, 1), tgt_mask=tgt_mask,
+        TFdecoded = (self.transformer_decoder(TFsrc.permute(2, 0, 1), TFencoded.permute(2, 0, 1),
+                                              tgt_mask=tgt_mask,
                                               tgt_key_padding_mask=tgt_key_padding_mask,
                                               memory_key_padding_mask=memory_key_padding_mask)).permute(1, 2, 0)
 
         TFsrc = torch.concat((TFsrc, TFdecoded), axis=2)
         tgtshape = torch.zeros(x.shape[0], self.hidden_dim * self.feature_dim,
-                               self.hidden_dim * self.feature_dim * self.ResSeqLen)
+                               self.hidden_dim * self.feature_dim * self.ResSeqLen, dtype=self.dtype)
         TFRes = (self.TF(TFsrc.permute(2, 0, 1), tgtshape.permute(2, 0, 1))).permute(1, 2, 0)
 
         # FC output
@@ -138,13 +147,14 @@ class Model(nn.Module):
 # sequence_length 表示序列的长度。
 # in_channels 表示每个时间步的特征向量的维度。
 class RecNet(nn.Module):
-    def __init__(self, input_size, output_dim):
+    def __init__(self, input_size, output_dim, dtype=torch.float16):
         super(RecNet, self).__init__()
+        self.dtype = dtype
         self.output_dim = output_dim
-        self.rnn = nn.RNN(input_size, output_dim, batch_first=True)
+        self.rnn = nn.RNN(input_size, output_dim, batch_first=True, dtype=self.dtype)
 
     def forward(self, x):
-        h0 = torch.zeros(1, x.size(0), self.output_dim)  # 初始化隐藏状态
+        h0 = torch.zeros(1, x.size(0), self.output_dim, dtype=self.dtype)  # 初始化隐藏状态
         out, _ = self.rnn(x, h0)
         return out
 
@@ -154,12 +164,16 @@ class RecNet(nn.Module):
 # batch_size 表示批次的大小。
 # in_channels 表示每个时间步的特征向量的维度。
 class Transformer(nn.Module):
-    def __init__(self, d_model, nhead, num_encoder_layers, num_decoder_layers, dim_feedforward=2048, dropout=0.1):
+    def __init__(self, d_model, nhead, num_encoder_layers, num_decoder_layers, dim_feedforward=256, dropout=0.1,
+                 dtype=torch.float16):
         super(Transformer, self).__init__()
+        self.dtype = dtype
         self.encoder_layers = nn.ModuleList(
-            [TransformerEncoderLayer(d_model, nhead, dim_feedforward, dropout) for _ in range(num_encoder_layers)])
+            [TransformerEncoderLayer(d_model, nhead, dim_feedforward, dropout, dtype=self.dtype) for _ in
+             range(num_encoder_layers)])
         self.decoder_layers = nn.ModuleList(
-            [TransformerDecoderLayer(d_model, nhead, dim_feedforward, dropout) for _ in range(num_decoder_layers)])
+            [TransformerDecoderLayer(d_model, nhead, dim_feedforward, dropout, dtype=self.dtype) for _ in
+             range(num_decoder_layers)])
 
     def encode(self, src):
         for layer in self.encoder_layers:
@@ -178,15 +192,16 @@ class Transformer(nn.Module):
 
 
 class TransformerEncoderLayer(nn.Module):
-    def __init__(self, d_model, nhead, dim_feedforward=2048, dropout=0.1):
+    def __init__(self, d_model, nhead, dim_feedforward=256, dropout=0.1, dtype=torch.float16):
         super(TransformerEncoderLayer, self).__init__()
-        self.self_attn = nn.MultiheadAttention(d_model, nhead, dropout=dropout)
-        self.linear1 = nn.Linear(d_model, dim_feedforward)
+        self.dtype = dtype
+        self.self_attn = nn.MultiheadAttention(d_model, nhead, dropout=dropout, dtype=self.dtype)
+        self.linear1 = nn.Linear(d_model, dim_feedforward, dtype=self.dtype)
         self.dropout = nn.Dropout(dropout)
-        self.linear2 = nn.Linear(dim_feedforward, d_model)
+        self.linear2 = nn.Linear(dim_feedforward, d_model, dtype=self.dtype)
 
-        self.norm1 = nn.LayerNorm(d_model)
-        self.norm2 = nn.LayerNorm(d_model)
+        self.norm1 = nn.LayerNorm(d_model, dtype=self.dtype)
+        self.norm2 = nn.LayerNorm(d_model, dtype=self.dtype)
         self.dropout1 = nn.Dropout(dropout)
         self.dropout2 = nn.Dropout(dropout)
 
@@ -201,17 +216,18 @@ class TransformerEncoderLayer(nn.Module):
 
 
 class TransformerDecoderLayer(nn.Module):
-    def __init__(self, d_model, nhead, dim_feedforward=2048, dropout=0.1):
+    def __init__(self, d_model, nhead, dim_feedforward=256, dropout=0.1, dtype=torch.float16):
         super(TransformerDecoderLayer, self).__init__()
-        self.self_attn = nn.MultiheadAttention(d_model, nhead, dropout=dropout)
-        self.multihead_attn = nn.MultiheadAttention(d_model, nhead, dropout=dropout)
-        self.linear1 = nn.Linear(d_model, dim_feedforward)
+        self.dtype = dtype
+        self.self_attn = nn.MultiheadAttention(d_model, nhead, dropout=dropout, dtype=self.dtype)
+        self.multihead_attn = nn.MultiheadAttention(d_model, nhead, dropout=dropout, dtype=self.dtype)
+        self.linear1 = nn.Linear(d_model, dim_feedforward, dtype=self.dtype)
         self.dropout = nn.Dropout(dropout)
-        self.linear2 = nn.Linear(dim_feedforward, d_model)
+        self.linear2 = nn.Linear(dim_feedforward, d_model, dtype=self.dtype)
 
-        self.norm1 = nn.LayerNorm(d_model)
-        self.norm2 = nn.LayerNorm(d_model)
-        self.norm3 = nn.LayerNorm(d_model)
+        self.norm1 = nn.LayerNorm(d_model, dtype=self.dtype)
+        self.norm2 = nn.LayerNorm(d_model, dtype=self.dtype)
+        self.norm3 = nn.LayerNorm(d_model, dtype=self.dtype)
         self.dropout1 = nn.Dropout(dropout)
         self.dropout2 = nn.Dropout(dropout)
         self.dropout3 = nn.Dropout(dropout)
@@ -230,11 +246,12 @@ class TransformerDecoderLayer(nn.Module):
 
 
 class PositionalEncoding(nn.Module):
-    def __init__(self, dim, max_len=100):
+    def __init__(self, dim, max_len=100, dtype=torch.float16):
         super(PositionalEncoding, self).__init__()
-        pe = torch.zeros(max_len, dim)
-        position = torch.arange(0, max_len, dtype=torch.float).unsqueeze(1)
-        div_term = torch.exp(torch.arange(0, dim, 2).float() * (
+        self.dtype = dtype
+        pe = torch.zeros(max_len, dim, dtype=self.dtype)
+        position = torch.arange(0, max_len, dtype=self.dtype).unsqueeze(1)
+        div_term = torch.exp(torch.arange(0, dim, 2, dtype=self.dtype) * (
                 -np.log(10000.0) / dim))
         pe[:, 0::2] = torch.sin(position * div_term)
         pe[:, 1::2] = torch.cos(position * div_term)
@@ -250,17 +267,18 @@ class PositionalEncoding(nn.Module):
 # in_channels 表示输入通道的数量。
 # sequence_length 表示序列的长度。
 class ConvNet(nn.Module):
-    def __init__(self, input_dim, kernels, channels, strides):
+    def __init__(self, input_dim, kernels, channels, strides, dtype=torch.float16):
         super(ConvNet, self).__init__()
+        self.dtype = dtype
         sequential_list = []
         for i, (channel, kernel, stride) in enumerate(zip(channels, kernels, strides)):
             if i == 0:
                 sequential_list.append(nn.Conv1d(in_channels=input_dim, out_channels=channel, kernel_size=kernel,
-                                                 stride=stride))
+                                                 stride=stride, dtype=self.dtype))
             else:
                 sequential_list.append(nn.Conv1d(in_channels=channels[i - 1], out_channels=channel, kernel_size=kernel,
-                                                 stride=stride))
-            sequential_list.append(nn.BatchNorm1d(channel))
+                                                 stride=stride, dtype=self.dtype))
+            sequential_list.append(nn.BatchNorm1d(channel, dtype=self.dtype))
             sequential_list.append(nn.ReLU())
 
         self.conv_layers = nn.Sequential(*sequential_list)
