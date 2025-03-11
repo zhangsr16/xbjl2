@@ -272,6 +272,7 @@ class Trainer:
                 self.optimizer.zero_grad()
                 out = self.model(inputs)
                 loss = self.criterion(torch.log(out), labels)
+                print("loss:", loss)
                 loss.backward()
                 self.optimizer.step()
                 pred = out.argmax(1)
