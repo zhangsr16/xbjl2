@@ -17,6 +17,7 @@ from utils import read_config, get_logger
 
 
 def clusterEnv(data_tensor, env_tensors, config):
+    data_tensor = torch.nan_to_num(data_tensor, nan=0.0, posinf=0.0, neginf=0.0)
     epsilon = 1e-6
     seq_rate = (data_tensor[..., 1:] - data_tensor[..., :-1]) / (data_tensor[..., :-1] + epsilon)  # 末位维序列
     seq_mean = seq_rate.mean(dim=-1, keepdim=True)  # 最后一维求均
@@ -25,6 +26,7 @@ def clusterEnv(data_tensor, env_tensors, config):
     total_tensors = []
     for option in ['Area', 'Field']:
         env_tensor = env_tensors[option]
+        env_tensor = torch.nan_to_num(env_tensor, nan=0.0, posinf=0.0, neginf=0.0)
         SeqCented = TotalCented[:, config[option + 'Cluster'], :]  # select cols in each cycle, by config define
         # 将三维张量转换为二维数组
         seq_reshaped = SeqCented.view(SeqCented.shape[0], -1)
@@ -37,7 +39,7 @@ def clusterEnv(data_tensor, env_tensors, config):
         for cycle in range(env_tensor.shape[-1]):
             # 映射中心
             EnvCented = EnvTotalCented[..., cycle]  # select cols in each cycle, by config define
-            env_reshaped = EnvCented[:, config[option + 'Cluster'], :]  # select cols in each cycle, by config define
+            env_reshaped = EnvCented[:, config[option + 'EnvCluster'], :]  # select cols in each cycle, by config define
             initial_centers = env_reshaped.view(env_reshaped.shape[0], -1)
             env_total_reshaped = EnvCented.view(EnvCented.shape[0], -1)
 
@@ -96,7 +98,6 @@ class Saudi(Dataset):
         :param return_appendix_infos:
         """
         self.env = clusterEnv(data_tensor, env_tensor, config)
-
         self.data = data
         self.tensor = data_tensor
         self.device = device
@@ -106,6 +107,8 @@ class Saudi(Dataset):
 
         # preprocess
         self.data.replace([np.inf, -np.inf], 1e-6, inplace=True)
+        self.env = torch.nan_to_num(self.env, nan=0.0, posinf=0.0, neginf=0.0)
+        self.tensor = torch.nan_to_num(self.tensor, nan=0.0, posinf=0.0, neginf=0.0)
         # change the hdr_len to the actual value in the ip.header
 
         # collect appendix infos
