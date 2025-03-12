@@ -59,6 +59,7 @@ class Model(nn.Module):
         self.ResSeqLen = self.Cnn.output_seqlen(self.feature_dim) + self.feature_dim
 
         self.TF = Transformer(self.hidden_dim * self.feature_dim, self.hidden_dim * self.feature_dim, 2, 2,
+                              config=config,
                               dtype=self.dtype)
         self.fc = nn.Linear(self.hidden_dim * self.feature_dim * self.ResSeqLen, self.hidden_dim, bias=True,
                             dtype=self.dtype)
@@ -164,15 +165,15 @@ class RecNet(nn.Module):
 # batch_size 表示批次的大小。
 # in_channels 表示每个时间步的特征向量的维度。
 class Transformer(nn.Module):
-    def __init__(self, d_model, nhead, num_encoder_layers, num_decoder_layers, dim_feedforward=256, dropout=0.1,
+    def __init__(self, d_model, nhead, num_encoder_layers, num_decoder_layers, config,
                  dtype=torch.float16):
         super(Transformer, self).__init__()
         self.dtype = dtype
         self.encoder_layers = nn.ModuleList(
-            [TransformerEncoderLayer(d_model, nhead, dim_feedforward, dropout, dtype=self.dtype) for _ in
+            [TransformerEncoderLayer(d_model, nhead, config['trainer_dropout_hidden'], dtype=self.dtype) for _ in
              range(num_encoder_layers)])
         self.decoder_layers = nn.ModuleList(
-            [TransformerDecoderLayer(d_model, nhead, dim_feedforward, dropout, dtype=self.dtype) for _ in
+            [TransformerDecoderLayer(d_model, nhead, config['trainer_dropout_feature'], dtype=self.dtype) for _ in
              range(num_decoder_layers)])
 
     def encode(self, src):
@@ -192,56 +193,36 @@ class Transformer(nn.Module):
 
 
 class TransformerEncoderLayer(nn.Module):
-    def __init__(self, d_model, nhead, dim_feedforward=256, dropout=0.1, dtype=torch.float16):
+    def __init__(self, d_model, nhead, dropout=0.1, dtype=torch.float16):
         super(TransformerEncoderLayer, self).__init__()
         self.dtype = dtype
         self.self_attn = nn.MultiheadAttention(d_model, nhead, dropout=dropout, dtype=self.dtype)
-        self.linear1 = nn.Linear(d_model, dim_feedforward, dtype=self.dtype)
         self.dropout = nn.Dropout(dropout)
-        self.linear2 = nn.Linear(dim_feedforward, d_model, dtype=self.dtype)
-
-        self.norm1 = nn.LayerNorm(d_model, dtype=self.dtype)
-        self.norm2 = nn.LayerNorm(d_model, dtype=self.dtype)
-        self.dropout1 = nn.Dropout(dropout)
-        self.dropout2 = nn.Dropout(dropout)
+        self.norm = nn.LayerNorm(d_model, dtype=self.dtype)
 
     def forward(self, src):
         src2, _ = self.self_attn(src, src, src)
-        src = src + self.dropout1(src2)
-        src = self.norm1(src)
-        src2 = self.linear2(self.dropout(F.relu(self.linear1(src))))
-        src = src + self.dropout2(src2)
-        src = self.norm2(src)
+        src = src + self.dropout(src2)
+        src = self.norm(src)
         return src
 
 
 class TransformerDecoderLayer(nn.Module):
-    def __init__(self, d_model, nhead, dim_feedforward=256, dropout=0.1, dtype=torch.float16):
+    def __init__(self, d_model, nhead, dropout=0.1, dtype=torch.float16):
         super(TransformerDecoderLayer, self).__init__()
         self.dtype = dtype
         self.self_attn = nn.MultiheadAttention(d_model, nhead, dropout=dropout, dtype=self.dtype)
         self.multihead_attn = nn.MultiheadAttention(d_model, nhead, dropout=dropout, dtype=self.dtype)
-        self.linear1 = nn.Linear(d_model, dim_feedforward, dtype=self.dtype)
         self.dropout = nn.Dropout(dropout)
-        self.linear2 = nn.Linear(dim_feedforward, d_model, dtype=self.dtype)
-
-        self.norm1 = nn.LayerNorm(d_model, dtype=self.dtype)
-        self.norm2 = nn.LayerNorm(d_model, dtype=self.dtype)
-        self.norm3 = nn.LayerNorm(d_model, dtype=self.dtype)
-        self.dropout1 = nn.Dropout(dropout)
-        self.dropout2 = nn.Dropout(dropout)
-        self.dropout3 = nn.Dropout(dropout)
+        self.norm = nn.LayerNorm(d_model, dtype=self.dtype)
 
     def forward(self, tgt, memory):
         tgt2, _ = self.self_attn(tgt, tgt, tgt)
-        tgt = tgt + self.dropout1(tgt2)
-        tgt = self.norm1(tgt)
+        tgt = tgt + self.dropout(tgt2)
+        tgt = self.norm(tgt)
         tgt2, _ = self.multihead_attn(tgt, memory, memory)
-        tgt = tgt + self.dropout2(tgt2)
-        tgt = self.norm2(tgt)
-        tgt2 = self.linear2(self.dropout(F.relu(self.linear1(tgt))))
-        tgt = tgt + self.dropout3(tgt2)
-        tgt = self.norm3(tgt)
+        tgt = tgt + self.dropout(tgt2)
+        tgt = self.norm(tgt)
         return tgt
 
 
