@@ -10,6 +10,7 @@ from torch.utils.data import Dataset, DataLoader
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
 from utils import cosine_classsifier
+import time
 
 SEED = 1234
 torch.manual_seed(SEED)
@@ -43,22 +44,22 @@ class Model(nn.Module):
         encoder_layer = nn.TransformerEncoderLayer(d_model=self.hidden_dim, nhead=self.hidden_dim,
                                                    dim_feedforward=self.hidden_dim * self.feature_dim,
                                                    dtype=self.dtype)
-        self.transformer_encoder = nn.TransformerEncoder(encoder_layer, num_layers=2)
+        self.transformer_encoder = nn.TransformerEncoder(encoder_layer, num_layers=1)
         self.embed = nn.Linear(self.hidden_dim, self.hidden_dim * self.feature_dim, bias=True, dtype=self.dtype)
         # 定义 Transformer 解码器
         decoder_layer = nn.TransformerDecoderLayer(d_model=self.hidden_dim * self.feature_dim, nhead=self.feature_dim,
                                                    dim_feedforward=self.hidden_dim * self.feature_dim,
                                                    dtype=self.dtype)
-        self.transformer_decoder = nn.TransformerDecoder(decoder_layer, num_layers=2)
+        self.transformer_decoder = nn.TransformerDecoder(decoder_layer, num_layers=1)
 
         # Models
-        self.Cnn = ConvNet(self.hidden_dim, [2, 1],
-                           [self.hidden_dim * self.feature_dim, self.hidden_dim * self.feature_dim], [1, 1],
+        self.Cnn = ConvNet(self.hidden_dim, [2],
+                           [self.hidden_dim * self.feature_dim, self.hidden_dim * self.feature_dim], [1],
                            dtype=self.dtype)
         self.Rnn = RecNet(self.hidden_dim, self.hidden_dim * self.feature_dim, dtype=self.dtype)
         self.ResSeqLen = self.Cnn.output_seqlen(self.feature_dim) + self.feature_dim
 
-        self.TF = Transformer(self.hidden_dim * self.feature_dim, self.hidden_dim * self.feature_dim, 2, 2,
+        self.TF = Transformer(self.hidden_dim * self.feature_dim, self.hidden_dim * self.feature_dim, 1, 1,
                               config=config,
                               dtype=self.dtype)
         self.fc = nn.Linear(self.hidden_dim * self.feature_dim * self.ResSeqLen, self.hidden_dim, bias=True,
@@ -92,6 +93,7 @@ class Model(nn.Module):
         # TFsrc=torch.concat((CnnRes,RnnRes), axis=2)
         # TFen=(TF.encode(TFsrc.permute(2, 0, 1))).permute(1, 2, 0)
         """
+        Start_time = time.time()
         # batch, feature, seq, cluster_dim, cyc
         x, env = x_env
         x = x[..., 1:]
@@ -103,27 +105,45 @@ class Model(nn.Module):
         memory_key_padding_mask = torch.zeros(x.shape[0], self.feature_dim, dtype=torch.bool)
         tgt_mask = nn.Transformer.generate_square_subsequent_mask(self.ResSeqLen).type(torch.bool)
         tgt_key_padding_mask = torch.zeros(x.shape[0], self.ResSeqLen, dtype=torch.bool)
+
+        start_time = time.time()
         TFencoded = (
             self.transformer_encoder(x.permute(2, 0, 1), mask=src_mask,
                                      src_key_padding_mask=src_key_padding_mask)).permute(1, 2, 0)
+        end_time = time.time()
+        TFencoded_time = end_time - start_time
 
         TFencoded = (self.embed(TFencoded.permute(0, 2, 1))).permute(0, 2, 1)
         hidden = self.dropout1(x)
         # Models
+        start_time = time.time()
         CnnRes = self.Cnn(hidden)
+        end_time = time.time()
+        CnnRes_time = end_time - start_time
+
+        start_time = time.time()
         RnnRes = (self.Rnn(hidden.permute(0, 2, 1))).permute(0, 2, 1)
+        end_time = time.time()
+        RnnRes_time = end_time - start_time
 
         TFsrc = torch.concat((CnnRes, RnnRes), axis=2)
 
+        start_time = time.time()
         TFdecoded = (self.transformer_decoder(TFsrc.permute(2, 0, 1), TFencoded.permute(2, 0, 1),
                                               tgt_mask=tgt_mask,
                                               tgt_key_padding_mask=tgt_key_padding_mask,
                                               memory_key_padding_mask=memory_key_padding_mask)).permute(1, 2, 0)
+        end_time = time.time()
+        TFdecoded_time = end_time - start_time
 
         TFsrc = torch.concat((TFsrc, TFdecoded), axis=2)
         tgtshape = torch.zeros(x.shape[0], self.hidden_dim * self.feature_dim,
                                self.hidden_dim * self.feature_dim * self.ResSeqLen, dtype=self.dtype)
+
+        start_time = time.time()
         TFRes = (self.TF(TFsrc.permute(2, 0, 1), tgtshape.permute(2, 0, 1))).permute(1, 2, 0)
+        end_time = time.time()
+        TFRes_time = end_time - start_time
 
         # FC output
         feature = self.fc(TFRes)
@@ -132,6 +152,10 @@ class Model(nn.Module):
         hidden = self.dropout2(hidden)
         logits = self.output(hidden)
         logits = logits.reshape(logits.shape[0], -1)
+
+        End_time = time.time()
+        Total_time = End_time - Start_time
+        print(f"Time Records:\nTotal :{Total_time}, TFencoded:{TFencoded_time}, CnnRes:{CnnRes_time}, RnnRes:{RnnRes_time}, TFdecoded:{TFdecoded_time}, TFRes:{TFRes_time}")
         return F.softmax(logits, dim=1)
 
         # cosine output
@@ -212,15 +236,11 @@ class TransformerDecoderLayer(nn.Module):
         super(TransformerDecoderLayer, self).__init__()
         self.dtype = dtype
         self.self_attn = nn.MultiheadAttention(d_model, nhead, dropout=dropout, dtype=self.dtype)
-        self.multihead_attn = nn.MultiheadAttention(d_model, nhead, dropout=dropout, dtype=self.dtype)
         self.dropout = nn.Dropout(dropout)
         self.norm = nn.LayerNorm(d_model, dtype=self.dtype)
 
     def forward(self, tgt, memory):
-        tgt2, _ = self.self_attn(tgt, tgt, tgt)
-        tgt = tgt + self.dropout(tgt2)
-        tgt = self.norm(tgt)
-        tgt2, _ = self.multihead_attn(tgt, memory, memory)
+        tgt2, _ = self.self_attn(tgt, memory, memory)
         tgt = tgt + self.dropout(tgt2)
         tgt = self.norm(tgt)
         return tgt
