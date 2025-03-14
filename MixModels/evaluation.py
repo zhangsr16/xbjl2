@@ -77,7 +77,7 @@ if __name__ == '__main__':
     evaluator = Evaluator(app_config_df, model_load_path, test_path, env_path, )
     # inference from dir demo
     predicts, labels, pred_scores, appendix_infos, features = evaluator.inference()
-    res_df = features.data[['DATE', '所属行业', '代码', '名称', 'app_id']]
+    res_df = features.data[['DATE', '所属行业', '代码', '名称', 'app_name', 'app_id']]
     res_df['app_id'] = predicts
     res_df = res_df[res_df['app_id'] != 0]
     res_df = res_df.reset_index(drop=True)
