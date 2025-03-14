@@ -35,8 +35,8 @@ class Model(nn.Module):
         self.hidden_dim = input_dim['hidden_dim']  # Chanel
         self.output_dim = output_dim
         self.feature_dim = input_dim['feature_dim']  # SeqLen
-        self.dropout1 = nn.Dropout(config["trainer_dropout_feature"])
-        self.dropout2 = nn.Dropout(config["trainer_dropout_hidden"])
+        self.dropout_feature = nn.Dropout(config["trainer_dropout_feature"])
+        self.dropout_hidden = nn.Dropout(config["trainer_dropout_hidden"])
         self.dtype = torch.float
 
         # Transformer
@@ -62,12 +62,13 @@ class Model(nn.Module):
         self.TF = Transformer(self.hidden_dim * self.feature_dim, self.hidden_dim * self.feature_dim, 1, 1,
                               config=config,
                               dtype=self.dtype)
-        self.fc = nn.Linear(self.hidden_dim * self.feature_dim * self.ResSeqLen, self.hidden_dim, bias=True,
-                            dtype=self.dtype)
 
         # FC classifier.
-        self.output = nn.Linear(self.hidden_dim, self.output_dim, bias=False, dtype=self.dtype)
+        self.fc = nn.Linear(self.hidden_dim * self.feature_dim * self.hidden_dim * self.feature_dim * self.ResSeqLen,
+                            self.hidden_dim * self.feature_dim, bias=True,
+                            dtype=self.dtype)
         self.bn = nn.BatchNorm1d(self.hidden_dim * self.feature_dim, dtype=self.dtype)
+        self.output = nn.Linear(self.hidden_dim * self.feature_dim, self.output_dim, bias=False, dtype=self.dtype)
         self.relu = nn.ReLU()
 
         # cosine classifier
@@ -99,36 +100,37 @@ class Model(nn.Module):
         x = x[..., 1:]
         x = torch.nan_to_num(x, nan=0.0, posinf=0.0, neginf=0.0)
         x = torch.concat((x, env), axis=1).to(self.dtype)
-        # Transformer
+        # Masks
         src_mask = nn.Transformer.generate_square_subsequent_mask(self.feature_dim, dtype=torch.bool)
         src_key_padding_mask = torch.zeros(x.shape[0], self.feature_dim, dtype=torch.bool)
         memory_key_padding_mask = torch.zeros(x.shape[0], self.feature_dim, dtype=torch.bool)
         tgt_mask = nn.Transformer.generate_square_subsequent_mask(self.ResSeqLen).type(torch.bool)
         tgt_key_padding_mask = torch.zeros(x.shape[0], self.ResSeqLen, dtype=torch.bool)
 
+        # Encode_TF
         start_time = time.time()
         TFencoded = (
             self.transformer_encoder(x.permute(2, 0, 1), mask=src_mask,
                                      src_key_padding_mask=src_key_padding_mask)).permute(1, 2, 0)
+        TFencoded = (self.embed(TFencoded.permute(0, 2, 1))).permute(0, 2, 1)
         end_time = time.time()
         TFencoded_time = end_time - start_time
 
-        TFencoded = (self.embed(TFencoded.permute(0, 2, 1))).permute(0, 2, 1)
-        hidden = self.dropout1(x)
-        # Models
+        # Encode_CNN
         start_time = time.time()
-        CnnRes = self.Cnn(hidden)
+        CnnRes = self.Cnn(x)
         end_time = time.time()
         CnnRes_time = end_time - start_time
 
+        # Encode_RNN
         start_time = time.time()
-        RnnRes = (self.Rnn(hidden.permute(0, 2, 1))).permute(0, 2, 1)
+        RnnRes = (self.Rnn(x.permute(0, 2, 1))).permute(0, 2, 1)
         end_time = time.time()
         RnnRes_time = end_time - start_time
 
-        TFsrc = torch.concat((CnnRes, RnnRes), axis=2)
-
+        # Decode_Total
         start_time = time.time()
+        TFsrc = torch.concat((CnnRes, RnnRes), axis=2)
         TFdecoded = (self.transformer_decoder(TFsrc.permute(2, 0, 1), TFencoded.permute(2, 0, 1),
                                               tgt_mask=tgt_mask,
                                               tgt_key_padding_mask=tgt_key_padding_mask,
@@ -136,26 +138,28 @@ class Model(nn.Module):
         end_time = time.time()
         TFdecoded_time = end_time - start_time
 
+        # TF
+        start_time = time.time()
         TFsrc = torch.concat((TFsrc, TFdecoded), axis=2)
         tgtshape = torch.zeros(x.shape[0], self.hidden_dim * self.feature_dim,
                                self.hidden_dim * self.feature_dim * self.ResSeqLen, dtype=self.dtype)
-
-        start_time = time.time()
         TFRes = (self.TF(TFsrc.permute(2, 0, 1), tgtshape.permute(2, 0, 1))).permute(1, 2, 0)
+        TFRes = TFRes.reshape(TFRes.shape[0], -1)
         end_time = time.time()
         TFRes_time = end_time - start_time
 
         # FC output
-        feature = self.fc(TFRes)
-        hidden = self.bn(feature)
+        hidden = self.dropout_hidden(TFRes)
+        hidden = self.fc(hidden)
+        hidden = self.bn(hidden)
         hidden = self.relu(hidden)
-        hidden = self.dropout2(hidden)
+        hidden = self.dropout_feature(hidden)
         logits = self.output(hidden)
         logits = logits.reshape(logits.shape[0], -1)
 
         End_time = time.time()
         Total_time = End_time - Start_time
-        print(f"Time Records:\nTotal :{Total_time}, TFencoded:{TFencoded_time}, CnnRes:{CnnRes_time}, RnnRes:{RnnRes_time}, TFdecoded:{TFdecoded_time}, TFRes:{TFRes_time}")
+        # print(f"Time Records:\nTotal :{Total_time}, TFencoded:{TFencoded_time}, CnnRes:{CnnRes_time}, RnnRes:{RnnRes_time}, TFdecoded:{TFdecoded_time}, TFRes:{TFRes_time}")
         return F.softmax(logits, dim=1)
 
         # cosine output
