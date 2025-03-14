@@ -54,7 +54,7 @@ class Trainer:
         else:
             self.optimizer = torch.optim.AdamW(params, lr=self.config["trainer_base_lr"],
                                                weight_decay=self.config["trainer_weight_decay"])
-        self.criterion = torch.nn.NLLLoss()
+        self.criterion = torch.nn.NLLLoss(weight=torch.tensor(config["trainer_criterion_weight"]))
 
     def inference(self, data_loader, others_threshold=None):
         """
@@ -272,7 +272,6 @@ class Trainer:
                 self.optimizer.zero_grad()
                 out = self.model(inputs)
                 loss = self.criterion(torch.log(out), labels)
-                print("loss:", loss)
                 loss.backward()
                 self.optimizer.step()
                 pred = out.argmax(1)
@@ -316,23 +315,10 @@ class Trainer:
             self.logger.info("epoch: %d, train_loss: %.3f, train_acc: %.3f" % (epoch, train_loss, train_acc))
             self.logger.info("test_acc: %.3f, top3_acc: %.3f, blocks_acc: %.3f" % (
                 results["accuracy"], results["top3_accuracy"], results["blocks_acc"]))
-            if 'bytes_cm' in results:
-                self.logger.info("precision(macro), flow: {:.4f}, bytes: {:.4f}".format(results["macro_precision"],
-                                                                                        results[
-                                                                                            'macro_bytes_precision']))
-                self.logger.info("recall(macro), flow: {:.4f}, bytes: {:.4f}".format(results["macro_recall"],
-                                                                                     results['macro_bytes_recall']))
-                self.logger.info("recall for NormalApps, flow: {:.4f}, bytes: {:.4f}".format(results["others_recall"],
-                                                                                             results[
-                                                                                                 'others_bytes_recall']))
-                self.logger.info("recall for BlockApps, flow: {:.4f}, bytes: {:.4f}".format(results["blocks_recall"],
-                                                                                            results[
-                                                                                                'blocks_bytes_recall']))
-            else:
-                self.logger.info("precision(macro): {:.4f}".format(results["macro_precision"]))
-                self.logger.info("recall(macro): {:.4f}".format(results["macro_recall"]))
-                self.logger.info("recall for Normal: {:.4f}".format(results["others_recall"]))
-                self.logger.info("recall for Block: {:.4f}".format(results["blocks_recall"]))
+            self.logger.info("precision(macro): {:.4f}".format(results["macro_precision"]))
+            self.logger.info("recall(macro): {:.4f}".format(results["macro_recall"]))
+            self.logger.info("recall for Normal: {:.4f}".format(results["others_recall"]))
+            self.logger.info("recall for Block: {:.4f}".format(results["blocks_recall"]))
 
             log_confusion_matrix(self.logger, results["cm"], self.app_config)
 
@@ -371,38 +357,6 @@ def evaluation(predicts, labels, pred_scores, unique_labels, others_label, appen
     if samples_max_label > given_max_label:
         raise ValueError(f"Max label in given labels is {samples_max_label}, "
                          f"but the unique_labels(given by app_config) is {given_max_label}")
-
-    if appendix_infos:
-        flow_bytes = np.concatenate([i.flow_bytes.detach().cpu().numpy() for i in appendix_infos])
-        flow_bytes_cm = [[0] * (given_max_label + 1) for _ in range(given_max_label + 1)]
-        for l, p, f in zip(labels, predicts, flow_bytes):
-            flow_bytes_cm[l][p] += f
-        flow_bytes_cm = np.array(flow_bytes_cm)
-
-        bytes_precisions = []
-        bytes_recalls = []
-        for i in unique_labels:
-            tp = flow_bytes_cm[i][i]
-            fp = sum(flow_bytes_cm[:, i]) - tp
-            fn = sum(flow_bytes_cm[i, :]) - tp
-            bytes_precisions.append(tp / (tp + fp) if tp + fp != 0 else 0)
-            bytes_recalls.append(tp / (tp + fn) if tp + fn != 0 else 0)
-
-        others_total_bytes = flow_bytes_cm[others_label, :].sum()
-        others_bytes_recall = flow_bytes_cm[others_label, others_label] / others_total_bytes
-        blocks_bytes_recall = 1 - (
-                flow_bytes_cm[:, others_label].sum() - flow_bytes_cm[others_label, others_label]) / (
-                                      flow_bytes_cm.sum() - others_total_bytes)
-        block_other_f1_bytes = 2 / (1 / others_bytes_recall + 1 / blocks_bytes_recall)
-
-        results = {
-            "macro_bytes_precision": np.mean(bytes_precisions),
-            "macro_bytes_recall": np.mean(bytes_recalls),
-            "bytes_cm": flow_bytes_cm,
-            "others_bytes_recall": others_bytes_recall,
-            "blocks_bytes_recall": blocks_bytes_recall,
-            "block_other_f1_bytes": block_other_f1_bytes
-        }
 
     top3_predicts = np.argsort(pred_scores)[:, -3:]
     top3_accuracy = np.mean(np.any(top3_predicts == labels[:, None], axis=1)).item()
@@ -444,6 +398,7 @@ def evaluation(predicts, labels, pred_scores, unique_labels, others_label, appen
     results["blocks_recall"] = blocks_recall
     results["blocks_acc"] = blocks_acc
     results["block_other_f1"] = block_other_f1
+    results["ratio"] = cm[1, 1] / cm[0, 1]
 
     return results
 
@@ -461,8 +416,8 @@ def main(train_path, test_path, env_path, app_config, train_type, base_model_pat
     appName_to_id, id_to_appName = get_app_config_info(app_config)
 
     # load the dataset
-    train_data, train_tensor = read_data(config, train_path, id_to_appName, folder_to_label)
-    test_data, test_tensor = read_data(config, test_path, id_to_appName, folder_to_label)
+    train_data, train_tensor = read_data(config, train_path, id_to_appName)
+    test_data, test_tensor = read_data(config, test_path, id_to_appName)
     env_data = read_env(config, env_path)
     hidden_dim = train_tensor.shape[1]
     for option in ['Area', 'Field']:
@@ -470,9 +425,7 @@ def main(train_path, test_path, env_path, app_config, train_type, base_model_pat
         kcols_len = len(config[option + 'Cluster'])
         cyc_len = env_data[option].shape[-1]
         hidden_dim += (cols_len + kcols_len) * cyc_len
-    input_dim = {}
-    input_dim['hidden_dim'] = hidden_dim
-    input_dim['feature_dim'] = train_tensor.shape[-1] - 1
+    input_dim = {'hidden_dim': hidden_dim, 'feature_dim': test_tensor.shape[-1] - 1}
     trainer = Trainer(app_config, config, input_dim, appName_to_id, id_to_appName, base_model_path, model_save_path,
                       logger)
     results = trainer.run(train_data, test_data, env_data, train_tensor, test_tensor, train_type,
@@ -503,7 +456,7 @@ def main(train_path, test_path, env_path, app_config, train_type, base_model_pat
 # THS = 4
 
 if __name__ == '__main__':
-    train_path = "./Training_set"
+    train_path = "./Testing_set"
     test_path = "./Testing_set"
     env_path = "./Env_set"
     app_config_path = "./appConfig.csv"
