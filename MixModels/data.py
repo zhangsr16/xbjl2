@@ -99,6 +99,7 @@ class Saudi(Dataset):
         """
         self.env = clusterEnv(data_tensor, env_tensor, config)
         self.data = data
+
         self.tensor = data_tensor
         self.device = device
         self.config = config
@@ -207,6 +208,14 @@ def read_data(config, data_folder, id_to_label, folder_id_to_label_id=None):
         tensors = torch.concat(tuple(tensor_dfs), axis=2)
         tensors_dfs.append(tensors)
     tensor_data = torch.concat(tuple(tensors_dfs), axis=0)
+    new_tensors = []
+    for i in range(tensor_data.shape[-1]):
+        new_tensor = tensor_data[:, config["FieldCluster"], i]
+        column_sums = new_tensor.sum(dim=0, keepdim=False)  # 沿第0维求和
+        new_tensor = new_tensor / column_sums  # 张量除法支持广播机制（broadcasting），维度自动扩展
+        new_tensors.append(new_tensor)
+    new_tensors = torch.stack(tuple(new_tensors), dim=-1)
+    tensor_data = torch.concat((tensor_data, new_tensors), axis=1)
     total_data = pd.concat(total_dfs).reset_index(drop=True)
     return total_data, tensor_data
 
