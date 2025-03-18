@@ -7,6 +7,7 @@ import random
 import sys
 from itertools import chain
 from sklearn.cluster import KMeans
+from sklearn.metrics import silhouette_score
 import numpy as np
 import pandas as pd
 import torch
@@ -14,6 +15,56 @@ from torch.utils.data import Dataset
 from tqdm import tqdm
 
 from utils import read_config, get_logger
+
+def centerETF(ETF_tensor):
+    data_tensor_total = torch.nan_to_num(ETF_tensor, nan=0.0, posinf=0.0, neginf=0.0)
+    epsilon = 1e-6
+    data_tensor = data_tensor_total[..., -1]
+    seq_rate = (data_tensor[..., 1:] - data_tensor[..., :-1]) / (data_tensor[..., :-1] + epsilon)  # 末位维序列
+    seq_mean = seq_rate.mean(dim=-1, keepdim=True)  # 最后一维求均
+    seq_scale = (seq_rate - seq_mean) / (seq_mean + epsilon)  # 变化率中心化
+    # 将三维张量转换为二维数组
+    total_reshaped = data_tensor_total.view(data_tensor_total.shape[0], -1)
+    seq_reshaped = seq_scale.view(seq_scale.shape[0], -1)
+
+    # 使用K-Means聚类算法进行聚类分析
+    # 肘部法
+    sse = []
+    for k in range(1, 11):
+        kmeans = KMeans(n_clusters=k, n_init=k, random_state=0)
+        kmeans.fit(seq_reshaped)
+        sse.append(kmeans.inertia_)
+    # 轮廓系数
+    silhouette_scores = []
+    for k in range(2, 11):
+        kmeans = KMeans(n_clusters=k, n_init=k, random_state=0)
+        labels = kmeans.fit_predict(seq_reshaped)
+        silhouette_scores.append(silhouette_score(seq_reshaped, labels))
+
+    # 输出最佳聚类数
+    best_k_elbow = np.argmax(np.diff(sse)) + 1
+    best_k_silhouette = np.argmax(silhouette_scores) + 2
+    best_k = max(best_k_elbow, best_k_silhouette)
+
+    kmeans = KMeans(n_clusters=best_k, n_init=best_k, max_iter=best_k, random_state=0)
+    kmeans.fit(seq_reshaped)
+    # 获取聚类中心
+    centroids = kmeans.cluster_centers_
+    centroids_tensor = torch.tensor(centroids).float()
+    # 计算每个点到聚类中心的Euclidean距离
+    distances = torch.cdist(seq_reshaped.unsqueeze(1), centroids_tensor.unsqueeze(0)).squeeze(1)
+
+    # 设置sigma参数，衰减率正比于中心数
+    sigma = 1 / best_k
+    # 计算权重矩阵，使用高斯核函数
+    weights = torch.exp(-distances ** 2 / (2 * sigma ** 2))
+    # 归一化权重矩阵，使每列的权重和为1
+    weights /= weights.sum(axis=0, keepdims=True)
+    # 计算加权均值，得到新的聚类中心
+    new_cluster_centers = np.dot(weights.T, total_reshaped)
+    centroids_tensor = torch.tensor(new_cluster_centers).float()
+    ResETF = centroids_tensor.view(best_k, data_tensor_total.shape[1], data_tensor_total.shape[2], -1)
+    return ResETF
 
 
 def clusterEnv(data_tensor, env_tensors, config):
@@ -160,7 +211,9 @@ def read_env(config, data_folder):
             tensors = torch.unsqueeze(tensors, dim=3)
             tensors_dfs.append(tensors)
         tensors = torch.concat(tuple(tensors_dfs), axis=3)
-        total_dfs[folder_id] = tensors
+        if folder_id == 'ETF':
+            tensors = centerETF(tensors)
+        total_dfs[folder_id] = tensors  
     return total_dfs
 
 
