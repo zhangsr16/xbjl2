@@ -1,4 +1,5 @@
 import pandas as pd
+import shutil
 import os
 
 def give_rows(df_list, key_column, common_rows, seq_start, seq_end):
@@ -98,3 +99,29 @@ predict_up, predict_other = spilt_dataset(union_dfs, './Predict_set/', column_fo
 
 # 生成数据集
 print(f"Train: {train_up, train_other}, Test {test_up, test_other}, Predict: {predict_up, predict_other}")
+
+
+# EnvSet
+data_folder = 'C:/Users/z30060762/Desktop/Ptest/THSData-main/Data/Dataset-master/XLSX/'
+
+label_folders = [f.path for f in os.scandir(data_folder) if f.is_dir()]
+total_dfs = ['Area', 'Field']
+# Read all option_dirs
+for label_folder in label_folders:
+    folder_id = os.path.basename(label_folder)
+    if folder_id not in total_dfs:
+        continue
+    # Read all cycle_dirs
+    for f in os.scandir(label_folder):
+        cycle_id = os.path.basename(f)
+        # Read all layer_CSV
+        pos = 0
+        for file_name in reversed(os.listdir(f)):
+            if pos == seqlen:
+                break
+            if file_name.endswith('.xlsx'):
+                file_path = os.path.join(f, file_name)
+                destination_path = './Env_set/' + folder_id + '/' + cycle_id + '/' + file_name
+                shutil.copy(file_path, destination_path)
+                pos += 1
+
