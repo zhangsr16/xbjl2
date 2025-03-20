@@ -29,7 +29,7 @@
   "trainer_batchsize": 64,
   "trainer_dropout_feature": 0.1,
   "trainer_dropout_hidden": 0.1,
-  "trainer_criterion_weight": [0.2, 0.5],
+  "trainer_criterion_weight": [0.1, 0.2, 0.4],
   "trainer_weight_decay": 3,
   "trainer_epoch": 20,
   "trainer_early_stopping_epoch": 5,
