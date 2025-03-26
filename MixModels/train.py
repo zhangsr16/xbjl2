@@ -46,7 +46,7 @@ class Trainer:
             self.model = model.to(self.device)
         self.logger.info("=========================================================")
         self.logger.info("Model initialized successfully")
-        self.logger.info("model config: %s", json.dumps(self.config, indent=4))
+        # self.logger.info("model config: %s", json.dumps(self.config, indent=4))
         self.logger.info("app_config: \n%s", app_config.to_string(index=False))
         if params is None:
             self.optimizer = torch.optim.AdamW(self.model.parameters(), lr=self.config["trainer_base_lr"],
@@ -398,8 +398,11 @@ def evaluation(predicts, labels, pred_scores, unique_labels, others_label, appen
     results["blocks_recall"] = blocks_recall
     results["blocks_acc"] = blocks_acc
     results["block_other_f1"] = block_other_f1
-    results["ratio"] = cm[1, 1] / cm[0, 1]
-
+    results["ratio"] = 0
+    if cm[0, 1] != 0:
+        results["ratio"] = cm[1, 1] / cm[0, 1]
+    else:
+        results["ratio"] = cm[1, 1]
     return results
 
 
@@ -420,7 +423,7 @@ def main(train_path, test_path, env_path, app_config, train_type, base_model_pat
     test_data, test_tensor = read_data(config, test_path, id_to_appName)
     env_data = read_env(config, env_path)
     hidden_dim = train_tensor.shape[1]
-    for option in ['Area', 'Field']:
+    for option in ['Area', 'ETF', 'Field', 'Summary', 'Type']:
         cols_len = env_data[option].shape[1]
         kcols_len = len(config[option + 'Cluster'])
         cyc_len = env_data[option].shape[-1]
@@ -456,7 +459,7 @@ def main(train_path, test_path, env_path, app_config, train_type, base_model_pat
 # THS = 4
 
 if __name__ == '__main__':
-    train_path = "./Testing_set"
+    train_path = "./Training_set"
     test_path = "./Testing_set"
     env_path = "./Env_set"
     app_config_path = "./appConfig.csv"
