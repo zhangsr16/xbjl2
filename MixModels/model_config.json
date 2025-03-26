@@ -1,38 +1,12 @@
-涨幅	0	涨幅	0
-现价	1	现价	1
-涨跌	2	涨跌	2
-换手.	6	换手	3
-振幅.	20	振幅	4
-涨速.	3	涨速	5
-金额	21	总金额	6
-总市值	27	总市值	7
-流通市值	28	流通市值	8
-总手	5	总手	9
-现手	8	现手	10
-开盘	9	开盘	11
-昨收	10	昨收	12
-最高	11	最高	13
-最低	12	最低	14
-买价	13	买价	15
-卖价	14	卖价	16
-买量	17	买量	17
-卖量	18	卖量	18
-委比.	19	委比%	19
-量比	7	量比	20
-手.笔	24	手/笔	21
-外盘	25	外盘	22
-内盘	26	内盘	23
-
-
 {
   "trainer_base_lr": 0.001,
-  "trainer_batchsize": 64,
+  "trainer_batchsize": 16,
   "trainer_dropout_feature": 0.1,
   "trainer_dropout_hidden": 0.1,
-  "trainer_criterion_weight": [0.1, 0.2, 0.4],
+  "trainer_criterion_weight": [0.2, 0.5],
   "trainer_weight_decay": 3,
-  "trainer_epoch": 20,
-  "trainer_early_stopping_epoch": 5,
+  "trainer_epoch": 30,
+  "trainer_early_stopping_epoch": 10,
   "trainer_early_stopping_metric": "ratio",
 
   "trainer_samplesize": "label_max_count",
@@ -61,7 +35,7 @@
   "SummaryEnvCluster": [0, 1, 2, 3, 5, 6],
   "ETFCluster": [0,1,2,6,20,3,21,27,28,5,8,9,10,11,12,13,14,17,18,19,7,24,25,26],
   "ETFEnvCluster": [0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23],
-  
+
   "eval_target_others_recall": 0.05,
 
   "simhash_del_times": 1,
