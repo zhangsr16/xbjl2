@@ -70,7 +70,7 @@ class Evaluator:
 if __name__ == '__main__':
     app_config_path = "./appConfig.csv"
     model_load_path = './MODEL'
-    test_path = "./Testing_set"
+    test_path = "./Predict_set"
     env_path = "./Env_set"
     # app_config
     app_config_df = pd.read_csv(app_config_path).dropna(subset=['AppName'])
@@ -79,8 +79,10 @@ if __name__ == '__main__':
     predicts, labels, pred_scores, appendix_infos, features = evaluator.inference()
     res_df = features.data[['DATE', '所属行业', '代码', '名称', 'app_name', 'app_id']]
     res_df['app_id'] = predicts
-    res_df = res_df[res_df['app_id'] != 0]
+    res_df = res_df[res_df['app_id'] == 1]
+    res_df = res_df.drop_duplicates(subset=['代码'])
     res_df = res_df.reset_index(drop=True)
+    res_df = res_df.sort_values(by='代码')
     res_df.to_excel(res_df['DATE'][0] + '.xlsx', index=False)
     # 2.metrics
     results = evaluation(predicts, labels, pred_scores, sorted(evaluator.id_to_appName.keys()),
