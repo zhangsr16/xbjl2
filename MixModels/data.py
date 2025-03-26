@@ -75,7 +75,7 @@ def clusterEnv(data_tensor, env_tensors, config):
     TotalCented = (seq_rate - seq_mean) / (seq_mean + epsilon)  # 变化率中心化
 
     total_tensors = []
-    for option in ['Area', 'Field']:
+    for option in ['Area', 'ETF', 'Field', 'Summary', 'Type']:
         env_tensor = env_tensors[option]
         env_tensor = torch.nan_to_num(env_tensor, nan=0.0, posinf=0.0, neginf=0.0)
         SeqCented = TotalCented[:, config[option + 'Cluster'], :]  # select cols in each cycle, by config define
@@ -213,7 +213,7 @@ def read_env(config, data_folder):
         tensors = torch.concat(tuple(tensors_dfs), axis=3)
         if folder_id == 'ETF':
             tensors = centerETF(tensors)
-        total_dfs[folder_id] = tensors  
+        total_dfs[folder_id] = tensors
     return total_dfs
 
 
@@ -263,7 +263,7 @@ def read_data(config, data_folder, id_to_label, folder_id_to_label_id=None):
     tensor_data = torch.concat(tuple(tensors_dfs), axis=0)
     new_tensors = []
     for i in range(tensor_data.shape[-1]):
-        new_tensor = tensor_data[:, config["FieldCluster"], i]
+        new_tensor = tensor_data[:, config["FieldCluster"][:3], i]
         column_sums = new_tensor.sum(dim=0, keepdim=False)  # 沿第0维求和
         new_tensor = new_tensor / column_sums  # 张量除法支持广播机制（broadcasting），维度自动扩展
         new_tensors.append(new_tensor)
