@@ -168,6 +168,137 @@ class Saudi(Dataset):
             pass
 
         self.labels = self.data['app_id'].values
+        tensor = self.tensor[..., 1:]
+
+        # Kernel Vectors
+        tensors_df = []
+        # Conv: batch_size, in_channels, sequence...
+        conv1d = nn.Conv1d(in_channels=self.tensor.shape[1], out_channels=self.tensor.shape[1], kernel_size=2, stride=1)
+        conv1d_env = nn.Conv1d(in_channels=self.env.shape[1], out_channels=self.env.shape[1], kernel_size=2, stride=1)
+        max_pool1d = nn.MaxPool1d(kernel_size=2, stride=1)
+        avg_pool1d = nn.AvgPool1d(kernel_size=2, stride=1)
+        tensor_conv = conv1d(self.tensor)
+        tensor_conv_env = conv1d_env(self.env)
+        tensor_maxpool = max_pool1d(self.tensor)
+        tensor_maxpool_env = max_pool1d(self.env)
+        tensor_avgpool = avg_pool1d(self.tensor)
+        tensor_avgpool_env = avg_pool1d(self.env)
+        tensors_df.append(tensor_conv)
+        tensors_df.append(tensor_avgpool)
+        tensors_df.append(tensor_maxpool)
+        tensors_df.append(self.env)
+        # tensors_df.append(tensor_conv_env)
+        # tensors_df.append(tensor_avgpool_env)
+        # tensors_df.append(tensor_maxpool_env)
+        # RNN: batch_size, sequence, in_channels
+        lstm = nn.LSTM(input_size=tensor.shape[1], hidden_size=tensor.shape[1],
+                       num_layers=tensor.shape[-1], batch_first=True)
+        lstm_env = nn.LSTM(input_size=self.env.shape[1], hidden_size=self.env.shape[1],
+                           num_layers=self.env.shape[-1], batch_first=True)
+        h0 = tensor.permute(2, 0, 1)
+        c0 = torch.zeros(tensor.shape[-1], tensor.shape[0], tensor.shape[1])
+        output_tensor, (hn, cn) = lstm(tensor.permute(0, 2, 1), (h0, c0))
+        tensor_RNN = output_tensor.permute(0, 2, 1)
+        tensor_RNN_hn = hn.permute(1, 2, 0)
+        tensor_RNN_cn = cn.permute(1, 2, 0)
+        h0 = self.env.permute(2, 0, 1)
+        c0 = torch.zeros(self.env.shape[-1], self.env.shape[0], self.env.shape[1])
+        output_tensor, (hn, cn) = lstm_env(self.env.permute(0, 2, 1), (h0, c0))
+        tensor_RNNenv = output_tensor.permute(0, 2, 1)
+        tensor_RNNenv_hn = hn.permute(1, 2, 0)
+        tensor_RNNenv_cn = cn.permute(1, 2, 0)
+        tensors_df.append(tensor_RNN)
+        tensors_df.append(tensor_RNN_hn)
+        tensors_df.append(tensor_RNN_cn)
+        tensors_df.append(tensor_RNNenv)
+        tensors_df.append(tensor_RNNenv_hn)
+        tensors_df.append(tensor_RNNenv_cn)
+        # Attention: batch_size, sequence, in_channels
+        attention = nn.MultiheadAttention(embed_dim=tensor.shape[1], num_heads=tensor.shape[1],
+                                          batch_first=True)
+        attention_env = nn.MultiheadAttention(embed_dim=self.env.shape[1], num_heads=self.env.shape[1],
+                                              batch_first=True)
+        output_tensor, attn_output_weights = attention(tensor.permute(0, 2, 1), tensor.permute(0, 2, 1),
+                                                       tensor.permute(0, 2, 1))
+        tensor_TF = output_tensor.permute(0, 2, 1)
+        tensor_TF_w = attn_output_weights.permute(0, 2, 1)
+        output_tensor, attn_output_weights = attention_env(self.env.permute(0, 2, 1), self.env.permute(0, 2, 1),
+                                                           self.env.permute(0, 2, 1))
+        tensor_TFenv = output_tensor.permute(0, 2, 1)
+        tensor_TFenv_w = attn_output_weights.permute(0, 2, 1)
+        tensors_df.append(tensor_TF)
+        tensors_df.append(tensor_TF_w)
+        tensors_df.append(tensor_TFenv)
+        tensors_df.append(tensor_TFenv_w)
+
+        # Tensors_con
+        tensors = torch.concat(tuple(tensors_df), dim=1)
+        # Norm: batch_size, in_channels, sequences
+        norm1d = nn.BatchNorm1d(num_features=tensors.shape[1])
+        tensors_normed = norm1d(tensors)
+
+        # Classifiers
+        self.classifiers = []
+        # SVM
+        base_svc = SVC(probability=True, kernel='rbf', gamma='scale', random_state=0)
+        SVM_Classifier = SelfTrainingClassifier(base_svc, criterion='k_best',
+                                                k_best=math.ceil(0.1 * tensors_normed.shape[0]))
+        X_train = tensors_normed.view(tensors_normed.shape[0], -1).detach().numpy()
+        y_train = np.array([self.labels])[0]
+        SVM_Classifier.fit(X_train, y_train)
+        y_pred = SVM_Classifier.predict(X_train)
+        self.classifiers.append(y_pred)
+        # DecisionTree
+        DecisionTree_Classifier = DecisionTreeClassifier(criterion='gini', max_depth=tensors_normed.shape[-1],
+                                                         random_state=0)
+        DecisionTree_Classifier.fit(X_train, y_train)
+        y_pred = DecisionTree_Classifier.predict(X_train)
+        self.classifiers.append(y_pred)
+        # NB
+        NB_Classifier = GaussianNB()
+        NB_Classifier.fit(X_train, y_train)
+        y_pred = NB_Classifier.predict(X_train)
+        self.classifiers.append(y_pred)
+        # EM_GaussianMixture
+        EM_Classifier = GaussianMixture(n_components=2, random_state=0)
+        EM_Classifier.fit(X_train)
+        y_pred = EM_Classifier.predict(X_train)
+        self.classifiers.append(y_pred)
+        # AdaBoost
+        AdaBoost_Classifier = AdaBoostClassifier(n_estimators=tensors_normed.shape[-1], random_state=0)
+        AdaBoost_Classifier.fit(X_train, y_train)
+        y_pred = AdaBoost_Classifier.predict(X_train)
+        self.classifiers.append(y_pred)
+        # Bagged Decision Trees
+        BagTrees_Classifier = BaggingClassifier(estimator=DecisionTree_Classifier,
+                                                n_estimators=tensors_normed.shape[-1],
+                                                random_state=0)
+        BagTrees_Classifier.fit(X_train, y_train)
+        y_pred = BagTrees_Classifier.predict(X_train)
+        self.classifiers.append(y_pred)
+        # RF
+        RF_Classifier = RandomForestClassifier(n_estimators=tensors_normed.shape[-1], random_state=0)
+        RF_Classifier.fit(X_train, y_train)
+        y_pred = RF_Classifier.predict(X_train)
+        self.classifiers.append(y_pred)
+        # kNN
+        kNN_Classifier = KNeighborsClassifier(n_neighbors=2)
+        kNN_Classifier.fit(X_train, y_train)
+        y_pred = kNN_Classifier.predict(X_train)
+        self.classifiers.append(y_pred)
+        # GaussianHMM
+        GaussianHMM = hmm.GaussianHMM(n_components=2, covariance_type="diag", n_iter=tensors_normed.shape[-1],
+                                      random_state=0)
+        GaussianHMM.fit(X_train)
+        y_pred = GaussianHMM.predict(X_train)
+        self.classifiers.append(y_pred)
+
+        # cm
+        for classifier in self.classifiers:
+            print(accuracy_score(y_train, classifier))
+            # confusion_matrix(y_train, y_pred)
+
+        self.CMs = self.labels
 
     def __len__(self):
         # 确保返回数据的长度
