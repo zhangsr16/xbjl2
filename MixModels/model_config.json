@@ -1,12 +1,14 @@
 {
   "trainer_base_lr": 0.001,
-  "trainer_batchsize": 16,
+  "trainer_batchsize": 64,
   "trainer_dropout_feature": 0.1,
   "trainer_dropout_hidden": 0.1,
   "trainer_criterion_weight": [0.2, 0.5],
+  "classifier_precision": 0.9,
+  "classifier_recall": 10,
   "trainer_weight_decay": 3,
-  "trainer_epoch": 30,
-  "trainer_early_stopping_epoch": 10,
+  "trainer_epoch": 20,
+  "trainer_early_stopping_epoch": 5,
   "trainer_early_stopping_metric": "ratio",
 
   "trainer_samplesize": "label_max_count",
