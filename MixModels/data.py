@@ -149,7 +149,6 @@ def clusterEnv(data_tensor, env_tensors, config):
     total_tensor = torch.concat(tuple(total_tensors), axis=1)
     return total_tensor
 
-
 class Saudi(Dataset):
     """
     dataset class
@@ -257,12 +256,12 @@ class Saudi(Dataset):
 
         # Classifiers
         self.classifiers = []
+        X_train = tensors_normed.view(tensors_normed.shape[0], -1).detach().numpy()
+        y_train = np.array([self.labels])[0]
         # SVM
         base_svc = SVC(probability=True, kernel='rbf', gamma='scale', random_state=0)
         SVM_Classifier = SelfTrainingClassifier(base_svc, criterion='k_best',
                                                 k_best=math.ceil(0.1 * tensors_normed.shape[0]))
-        X_train = tensors_normed.view(tensors_normed.shape[0], -1).detach().numpy()
-        y_train = np.array([self.labels])[0]
         SVM_Classifier.fit(X_train, y_train)
         y_pred = SVM_Classifier.predict(X_train)
         self.classifiers.append(y_pred)
@@ -311,12 +310,21 @@ class Saudi(Dataset):
         y_pred = GaussianHMM.predict(X_train)
         self.classifiers.append(y_pred)
 
+        self.classifiers_tensor = torch.stack(tuple(torch.tensor(self.classifiers)), dim=-1)
+        self.classifiers_RPscore = []
         # cm
         for classifier in self.classifiers:
-            print(accuracy_score(y_train, classifier))
-            # confusion_matrix(y_train, y_pred)
-
-        self.CMs = self.labels
+            cm = confusion_matrix(y_train, classifier)
+            print(accuracy_score(y_train, classifier), '\n', cm)
+            if cm[0, 1] == 0:
+                precision = cm[1, 1] / 1.0
+            else:
+                precision = cm[1, 1] / cm[0, 1]
+            if cm[1, 0] == 0:
+                recall = cm[1, 1] / 1.0
+            else:
+                recall = cm[1, 1] / cm[1, 0] == 0.0
+            self.classifiers_RPscore.append([precision, recall])
 
     def __len__(self):
         # 确保返回数据的长度
@@ -326,7 +334,7 @@ class Saudi(Dataset):
         # 检查索引是否超出范围
         if index >= len(self) or index < 0:
             raise IndexError("Index out of range")
-        x = [self.tensor[index], self.env[index]]
+        x = [self.tensor[index], self.env[index], self.classifiers_tensor[index], self.classifiers_RPscore]
         if self.return_appendix_infos:
             y = torch.tensor(self.labels[index], dtype=torch.long).to(self.device), self.appendix_infos[index]
         else:
