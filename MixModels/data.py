@@ -255,65 +255,90 @@ class Saudi(Dataset):
         tensors_normed = norm1d(tensors)
 
         # Classifiers
-        self.classifiers = []
-        X_train = tensors_normed.view(tensors_normed.shape[0], -1).detach().numpy()
-        y_train = np.array([self.labels])[0]
+        classifiers = []
+        self.classifyModels = {}
+        self.X_train = tensors_normed.view(tensors_normed.shape[0], -1).detach().numpy()
+        self.y_train = np.array([self.labels])[0]
         # SVM
         base_svc = SVC(probability=True, kernel='rbf', gamma='scale', random_state=0)
         SVM_Classifier = SelfTrainingClassifier(base_svc, criterion='k_best',
                                                 k_best=math.ceil(0.1 * tensors_normed.shape[0]))
-        SVM_Classifier.fit(X_train, y_train)
-        y_pred = SVM_Classifier.predict(X_train)
-        self.classifiers.append(y_pred)
+        SVM_Classifier.fit(self.X_train, self.y_train)
+        self.classifyModels['SVM_Classifier'] = SVM_Classifier
         # DecisionTree
         DecisionTree_Classifier = DecisionTreeClassifier(criterion='gini', max_depth=tensors_normed.shape[-1],
                                                          random_state=0)
-        DecisionTree_Classifier.fit(X_train, y_train)
-        y_pred = DecisionTree_Classifier.predict(X_train)
-        self.classifiers.append(y_pred)
+        DecisionTree_Classifier.fit(self.X_train, self.y_train)
+        self.classifyModels['DecisionTree_Classifier'] = DecisionTree_Classifier
         # NB
         NB_Classifier = GaussianNB()
-        NB_Classifier.fit(X_train, y_train)
-        y_pred = NB_Classifier.predict(X_train)
-        self.classifiers.append(y_pred)
+        NB_Classifier.fit(self.X_train, self.y_train)
+        self.classifyModels['NB_Classifier'] = NB_Classifier
         # EM_GaussianMixture
         EM_Classifier = GaussianMixture(n_components=2, random_state=0)
-        EM_Classifier.fit(X_train)
-        y_pred = EM_Classifier.predict(X_train)
-        self.classifiers.append(y_pred)
+        EM_Classifier.fit(self.X_train)
+        self.classifyModels['EM_Classifier'] = EM_Classifier
         # AdaBoost
         AdaBoost_Classifier = AdaBoostClassifier(n_estimators=tensors_normed.shape[-1], random_state=0)
-        AdaBoost_Classifier.fit(X_train, y_train)
-        y_pred = AdaBoost_Classifier.predict(X_train)
-        self.classifiers.append(y_pred)
+        AdaBoost_Classifier.fit(self.X_train, self.y_train)
+        self.classifyModels['AdaBoost_Classifier'] = AdaBoost_Classifier
         # Bagged Decision Trees
         BagTrees_Classifier = BaggingClassifier(estimator=DecisionTree_Classifier,
                                                 n_estimators=tensors_normed.shape[-1],
                                                 random_state=0)
-        BagTrees_Classifier.fit(X_train, y_train)
-        y_pred = BagTrees_Classifier.predict(X_train)
-        self.classifiers.append(y_pred)
+        BagTrees_Classifier.fit(self.X_train, self.y_train)
+        self.classifyModels['BagTrees_Classifier'] = BagTrees_Classifier
         # RF
         RF_Classifier = RandomForestClassifier(n_estimators=tensors_normed.shape[-1], random_state=0)
-        RF_Classifier.fit(X_train, y_train)
-        y_pred = RF_Classifier.predict(X_train)
-        self.classifiers.append(y_pred)
+        RF_Classifier.fit(self.X_train, self.y_train)
+        self.classifyModels['RF_Classifier'] = RF_Classifier
         # kNN
         kNN_Classifier = KNeighborsClassifier(n_neighbors=2)
-        kNN_Classifier.fit(X_train, y_train)
-        y_pred = kNN_Classifier.predict(X_train)
-        self.classifiers.append(y_pred)
+        kNN_Classifier.fit(self.X_train, self.y_train)
+        self.classifyModels['kNN_Classifier'] = kNN_Classifier
         # GaussianHMM
         GaussianHMM = hmm.GaussianHMM(n_components=2, covariance_type="diag", n_iter=tensors_normed.shape[-1],
                                       random_state=0)
-        GaussianHMM.fit(X_train)
-        y_pred = GaussianHMM.predict(X_train)
-        self.classifiers.append(y_pred)
+        GaussianHMM.fit(self.X_train)
+        self.classifyModels['GaussianHMM'] = GaussianHMM
 
-        self.classifiers_tensor = torch.stack(tuple(torch.tensor(self.classifiers)), dim=-1)
-        self.classifiers_RPscore = []
-        # cm
-        for classifier in self.classifiers:
+        # classifiers_cm
+        self.classifiers_tensor, self.classifiers_RPscore = self.classify(self.X_train, self.y_train)
+        self.classifiers_tensor_test = None
+        self.classifiers_RPscore_test = None
+
+    def classify(self, X_train, y_train):
+        classifiers = []
+        # SVM
+        y_pred = self.classifyModels['SVM_Classifier'].predict(X_train)
+        classifiers.append(y_pred)
+        # DecisionTree
+        y_pred = self.classifyModels['DecisionTree_Classifier'].predict(X_train)
+        classifiers.append(y_pred)
+        # NB
+        y_pred = self.classifyModels['NB_Classifier'].predict(X_train)
+        classifiers.append(y_pred)
+        # EM_GaussianMixture
+        y_pred = self.classifyModels['EM_Classifier'].predict(X_train)
+        classifiers.append(y_pred)
+        # AdaBoost
+        y_pred = self.classifyModels['AdaBoost_Classifier'].predict(X_train)
+        classifiers.append(y_pred)
+        # Bagged Decision Trees
+        y_pred = self.classifyModels['BagTrees_Classifier'].predict(X_train)
+        classifiers.append(y_pred)
+        # RF
+        y_pred = self.classifyModels['RF_Classifier'].predict(X_train)
+        classifiers.append(y_pred)
+        # kNN
+        y_pred = self.classifyModels['kNN_Classifier'].predict(X_train)
+        classifiers.append(y_pred)
+        # GaussianHMM
+        y_pred = self.classifyModels['GaussianHMM'].predict(X_train)
+        classifiers.append(y_pred)
+        classifiers_tensor = torch.stack(tuple(torch.tensor(classifiers)), dim=-1)
+        classifiers_RPscore = []
+        for classifier in classifiers:
             cm = confusion_matrix(y_train, classifier)
             print(accuracy_score(y_train, classifier), '\n', cm)
             if cm[0, 1] == 0:
@@ -323,8 +348,9 @@ class Saudi(Dataset):
             if cm[1, 0] == 0:
                 recall = cm[1, 1] / 1.0
             else:
-                recall = cm[1, 1] / cm[1, 0] == 0.0
-            self.classifiers_RPscore.append([precision, recall])
+                recall = cm[1, 1] / cm[1, 0]
+            classifiers_RPscore.append([precision, recall])
+        return classifiers_tensor, classifiers_RPscore
 
     def __len__(self):
         # 确保返回数据的长度
@@ -334,12 +360,13 @@ class Saudi(Dataset):
         # 检查索引是否超出范围
         if index >= len(self) or index < 0:
             raise IndexError("Index out of range")
-        x = [self.tensor[index], self.env[index], self.classifiers_tensor[index], self.classifiers_RPscore]
+        x = [self.tensor[index], self.env[index], self.classifiers_tensor[index], self.classifiers_RPscore_test]
         if self.return_appendix_infos:
             y = torch.tensor(self.labels[index], dtype=torch.long).to(self.device), self.appendix_infos[index]
         else:
             y = torch.tensor(self.labels[index], dtype=torch.long).to(self.device)
         return x, y
+
 
 
 def read_env(config, data_folder):
@@ -441,6 +468,9 @@ def get_data(train_data, test_data, train_tensor, test_tensor, env_data, device,
     """
     train_saudi = Saudi(train_data, train_tensor, env_data, device, config, id_to_appName)
     test_saudi = Saudi(test_data, test_tensor, env_data, device, config, id_to_appName)
+    train_saudi.classifiers_tensor_test, train_saudi.classifiers_RPscore_test = train_saudi.classify(test_saudi.X_train, test_saudi.y_train)
+    test_saudi.classifiers_tensor_test, test_saudi.classifiers_RPscore_test = test_saudi.classify(train_saudi.X_train, train_saudi.y_train)
+
 
     total_data_size = sys.getsizeof(train_saudi) * len(train_saudi) + sys.getsizeof(test_saudi) * len(test_saudi)
     print(f"Loaded dataset memory usage: {total_data_size / 1024 ** 2} MB, "
