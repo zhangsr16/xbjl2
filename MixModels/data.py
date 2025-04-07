@@ -1,7 +1,7 @@
 import hashlib
 import numbers
 import os
-
+import joblib
 os.environ["LOKY_MAX_CPU_COUNT"] = "4"  # 将 4 替换为您希望使用的核心数
 import random
 import sys
@@ -154,7 +154,7 @@ class Saudi(Dataset):
     dataset class
     """
 
-    def __init__(self, data, data_tensor, env_tensor, device, config, id_to_appName=None, return_appendix_infos=False):
+    def __init__(self, data, data_tensor, env_tensor, device, config, id_to_appName=None, return_appendix_infos=False, evaluation_classifier=False):
         """
         # mixed_features(1 x 59)：1.src/dst ports 32;proto 1;tcp.flags 8;ip.ttl 8;ip.hdr_len 4;tcp.hdr_len 6.
         # ip_direction_pkt_len_seqs(2 x 256): ip.directions 8 x 16repeat = 128;ip.pkt_lens 8 x 16 = 128.total 2 x 128.
@@ -173,7 +173,8 @@ class Saudi(Dataset):
         self.config = config
         self.id2app = id_to_appName
         self.return_appendix_infos = return_appendix_infos
-
+        self.evaluation_classifier = evaluation_classifier
+        
         # preprocess
         self.data.replace([np.inf, -np.inf], 1e-6, inplace=True)
         self.env = torch.nan_to_num(self.env, nan=0.0, posinf=0.0, neginf=0.0)
@@ -183,7 +184,14 @@ class Saudi(Dataset):
         # collect appendix infos
         if return_appendix_infos:
             pass
-
+        # classifier load
+        if self.evaluation_classifier:
+            self.classifiers_tensor_test = joblib.load('./Classifier/classifiers_tensor_test.joblib')
+            self.classifiers_RPscore_test = joblib.load('./Classifier/classifiers_RPscore_test.joblib')
+        else:
+            self.classifiers_tensor_test = None
+            self.classifiers_RPscore_test = None
+            
         self.labels = self.data['app_id'].values
         tensor = self.tensor[..., 1:]
 
@@ -304,8 +312,6 @@ class Saudi(Dataset):
 
         # classifiers_cm
         self.classifiers_tensor, self.classifiers_RPscore = self.classify(self.X_train, self.y_train)
-        self.classifiers_tensor_test = None
-        self.classifiers_RPscore_test = None
 
     def classify(self, X_train, y_train):
         classifiers = []
@@ -470,7 +476,8 @@ def get_data(train_data, test_data, train_tensor, test_tensor, env_data, device,
     test_saudi = Saudi(test_data, test_tensor, env_data, device, config, id_to_appName)
     train_saudi.classifiers_tensor_test, train_saudi.classifiers_RPscore_test = train_saudi.classify(test_saudi.X_train, test_saudi.y_train)
     test_saudi.classifiers_tensor_test, test_saudi.classifiers_RPscore_test = test_saudi.classify(train_saudi.X_train, train_saudi.y_train)
-
+    joblib.dump(test_saudi.classifiers_tensor_test, './Classifier/classifiers_tensor_test.joblib')
+    joblib.dump(test_saudi.classifiers_RPscore_test, './Classifier/classifiers_RPscore_test.joblib')
 
     total_data_size = sys.getsizeof(train_saudi) * len(train_saudi) + sys.getsizeof(test_saudi) * len(test_saudi)
     print(f"Loaded dataset memory usage: {total_data_size / 1024 ** 2} MB, "
