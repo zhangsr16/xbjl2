@@ -49,7 +49,7 @@ class Evaluator:
         """
         # get data.
         data_saudi = Saudi(self.test_data, self.test_tensor, self.env_data, self.device, self.config,
-                           self.id_to_appName)
+                           self.id_to_appName, evaluation_classifier=True)
         data_loader = DataLoader(data_saudi, batch_size=self.config["trainer_batchsize"], shuffle=False)
         self.logger.info(f"Original dataset contained {len(self.test_data)} entries, and after processing,"
                          f" {len(data_saudi.data)} entries remained")
