@@ -9,19 +9,25 @@ calculate_metrics <- function(model_name, predictions, train_y, Recall, Precis, 
     }
   }
 }
-Methods = c('dire', 'buy', 'max', 'min')
-nm=names(a0)
 
-for (i in 1:4) {
+col_start = 3
+Methods = c('dire', 'buy', 'max', 'min')
+nm1=nm2 = names(xn)
+for (i in 1:length(nm1)) {
+  nm1[i]=str_c(nm1[i], 1)
+  nm2[i]=str_c(nm2[i], 2)
+}
+names(xn1)=nm1
+for (i in 1:length(Methods)) {
   method = Methods[i]
   if (method=='buy') {
-    bef=a0[(2*alth+1):(6*alth),-c(1:3)]
+    bef=a0[(2*alth+1):(6*alth),-c(1:col_start)]
     tim=TIME[(2*alth+1):(6*alth)]
   }else{
-    bef=a0[(2*alth+1):(5*alth),-c(1:3)]
+    bef=a0[(2*alth+1):(5*alth),-c(1:col_start)]
     tim=TIME[(2*alth+1):(5*alth)]
   }
-  names(bef)=nm[-c(1,2,3)]
+  names(bef)=nm2
   
   #Input
   x.temp <- switch(method,
@@ -38,58 +44,107 @@ for (i in 1:4) {
     temp=cbind(xn[1:(3*alth),],xn1[1:(3*alth),],pre,bef,tim)
   }
   
-  test=temp
-  source("F:/Desktop/THS/Code/20240717/GetModel.R")
+  # GetModel
+  nx=train=temp
+  nx[is.na(nx)]=0
+  id.pre=which(names(nx)=="pre")
+  lmfit=lm(pre~., data=nx)#colline serious 本数据集内不可用
+  glmfit <- glm(pre ~ ., data=nx, family=binomial()) 
+  #RF <- randomForest(nx[,-id.pre], nx[,id.pre], prox=TRUE, importance=1, ntree = 100)
+  NB <- naive_bayes(as.factor(pre) ~ ., nx)
+  traindata1 <- data.matrix(nx[,-id.pre])
+  traindata2 <- Matrix(traindata1,sparse = T)
+  train_y <- as.numeric(nx[,id.pre]) #-1
+  traindata <- list(data=traindata2,label=train_y) 
+  dtrain <- xgb.DMatrix(data = traindata$data, label = traindata$label) 
+  model_xgb <- xgboost(data=dtrain,booster='gbtree',max_depth=2,eta=0.5,objective='multi:softmax',num_class=3,nround=25)
+  
   
   #TEST_cm
   if (method=='buy') {
-    bef=a0[(6*alth+1):(7*alth),-c(1:3)]
-    names(bef)=nm[-c(1,2,3)]
+    bef=a0[(6*alth+1):(7*alth),-c(1:col_start)]
+    names(bef)=nm2
     tim=TIME[(6*alth+1):(7*alth)]
     pre<-x.temp[(6*alth+1):(7*alth)]
     temp=cbind(xn[(4*alth+1):(5*alth),],xn1[(4*alth+1):(5*alth),],pre,bef,tim)
   }else{
-    bef=a0[(5*alth+1):(6*alth),-c(1:3)]
-    names(bef)=nm[-c(1,2,3)]
+    bef=a0[(5*alth+1):(6*alth),-c(1:col_start)]
+    names(bef)=nm2
     tim=TIME[(5*alth+1):(6*alth)]
     pre<-x.temp[(6*alth+1):(7*alth)]
     temp=cbind(xn[(3*alth+1):(4*alth),],xn1[(3*alth+1):(4*alth),],pre,bef,tim)
   }
   
+  # TestModel
+  nx=train=temp
+  nx[is.na(nx)]=0
+  glmpre <- predict(glmfit, newdata=nx)
+  lmpre <- predict(lmfit, newdata=nx)
+  #RFpre <- predict(RF, newdata=nx)
+  NBpre <- predict(NB, nx, type = "class")
+  traindata1 <- data.matrix(nx[,-id.pre])
+  traindata2 <- Matrix(traindata1,sparse = T)
+  train_y <- as.numeric(nx[,id.pre]) #-1
+  traindata <- list(data=traindata2,label=train_y) 
+  dtrain <- xgb.DMatrix(data = traindata$data, label = traindata$label) 
+  XGpre=(predict(model_xgb, newdata = dtrain))
   
-  test=temp
-  source("F:/Desktop/THS/Code/20240717/TestModel.R")
+  GLMpre=round(glmpre/abs(glmpre)) #glm-1-2ST
+  LMpre=ceiling(lmpre/abs(lmpre)) #lm-0-2ST
+  NBpre=ceiling(as.numeric(NBpre)) #NB-0-3ST
+  #RFpre=round(RFpre) #RF-0-1ST
+  XGpre=round(XGpre) #XG-1-1ST
   
   # 调用函数计算各模型的指标
   calculate_metrics("GLM", GLMpre, train_y, Recall, Precis, i)
   calculate_metrics("LM", LMpre, train_y, Recall, Precis, i)
   calculate_metrics("NB", NBpre, train_y, Recall, Precis, i)
   calculate_metrics("XG", XGpre, train_y, Recall, Precis, i)
-  calculate_metrics("RF", RFpre, train_y, Recall, Precis, i)
+  #calculate_metrics("RF", RFpre, train_y, Recall, Precis, i)
   
   #Predict
-  bef=a0[(7*alth+1):(8*alth),-c(1:3)]
-  names(bef)=nm[-c(1,2,3)]
+  bef=a0[(7*alth+1):(8*alth),-c(1:col_start)]
+  names(bef)=nm2
   tim=TIME[(7*alth+1):(8*alth)]
   temp=cbind(xn[(5*alth+1):(6*alth),],xn1[(5*alth+1):(6*alth),],rep(1,1*alth),bef,tim)
   
-  test=temp
-  source("F:/Desktop/THS/Code/20240717/UseModel.R")
+  # UseModel
+  nx=train=temp
+  nx[is.na(nx)]=0
+  
+  glmpre <- predict(glmfit, newdata=nx)
+  lmpre <- predict(lmfit, newdata=nx)
+  #RFpre <- predict(RF, newdata=nx)
+  NBpre <- predict(NB, nx, type = "class")
+  
+  traindata1 <- data.matrix(nx[,-id.pre])
+  traindata2 <- Matrix(traindata1,sparse = T)
+  train_y <- as.numeric(nx[,id.pre]) #-1
+  traindata <- list(data=traindata2,label=train_y) 
+  dtrain <- xgb.DMatrix(data = traindata$data, label = traindata$label) 
+  XGpre=(predict(model_xgb, newdata = dtrain))
+  
+  glmpre=round(glmpre/abs(glmpre)) #glm-1-2ST
+  lmpre=ceiling(lmpre/abs(lmpre)) #lm-0-2ST,RF=RFpre
+  NBpre=ceiling(as.numeric(NBpre)) #NB-0-3ST
+  #RFpre=round(RFpre) #RF-0-1ST
+  XGpre=round(XGpre) #XG-1-1ST
+  
   
   switch(method,
          "dire" = {
-           DIRE=data.frame(ID=a0[1:alth,c(1:4)],LM=lmpre,GLM=glmpre,NB=NBpre,XG=XGpre,RF=RFpre)
+           DIRE=data.frame(ID=a0[1:alth,c(1:col_start)],LM=lmpre,GLM=glmpre,NB=NBpre,XG=XGpre) #,RF=RFpre
            rate=(a0[(lth-alth+1):lth,"现价"]-tavg[(lth-alth+1):lth])/a0[(lth-alth+1):lth,"现价"]
-           PDATA=data.frame(ID=a0[(lth-alth+1):lth,c(1:4,17)],IP=ipan,OP=opan,uIP=l.ipan,uOP=l.opan,Stavg=stavg,Safety=rate,LM=lmpre,GLM=glmpre,NB=NBpre,XG=XGpre,RF=RFpre)
+           PDATA=data.frame(ID=a0[(lth-alth+1):lth,c(1:col_start,17)],IP=ipan,OP=opan,uIP=l.ipan,uOP=l.opan,Stavg=stavg,Safety=rate,LM=lmpre,GLM=glmpre,NB=NBpre,XG=XGpre)#,RF=RFpre
          },
          "buy" = {
-           BUY=data.frame(ID=a0[1:alth,c(1:4)],LM=lmpre,GLM=glmpre,NB=NBpre,XG=XGpre,RF=RFpre)
+           BUY=data.frame(ID=a0[1:alth,c(1:col_start)],LM=lmpre,GLM=glmpre,NB=NBpre,XG=XGpre)#,RF=RFpre
          },
          "max" = {
-           SMAX=data.frame(ID=a0[1:alth,c(1:4)],LM=lmpre,GLM=glmpre,NB=NBpre,XG=XGpre,RF=RFpre)
+           SMAX=data.frame(ID=a0[1:alth,c(1:col_start)],LM=lmpre,GLM=glmpre,NB=NBpre,XG=XGpre)#,RF=RFpre
          },
          "min" = {
-           SMIN=data.frame(ID=a0[1:alth,c(1:4)],LM=lmpre,GLM=glmpre,NB=NBpre,XG=XGpre,RF=RFpre)
+           SMIN=data.frame(ID=a0[1:alth,c(1:col_start)],LM=lmpre,GLM=glmpre,NB=NBpre,XG=XGpre)#,RF=RFpre
          }
   )
 }
@@ -110,7 +165,7 @@ if (tm==2) {
   hist(stavg);plot(statis$AI);plot(statis$HOT)
 }
 
-RecF=data.frame(WAY=c("DIRE","BUY","SMAX","SMIN"),LM=0,NB=0,GLM=0,XG=0,RF=0)
+RecF=data.frame(WAY=c("DIRE","BUY","SMAX","SMIN"),LM=0,NB=0,GLM=0,XG=0)#,RF=0
 PreF=RecF
 for (i in 1:4) {
   for (i2 in 2:6) {
