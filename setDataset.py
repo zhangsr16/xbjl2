@@ -23,7 +23,7 @@ def spilt_dataset(union_dfs, dataset_folder, exclude_columns):
     # 根据指定列的差值将数据分为两份
     if len(union_dfs) == seqlen + 1:
         positive_diff = (up_df['最高'] > 0) & (down_df['最低'] < 0)
-        negative_diff = (up_df['最高'] < 0) & (down_df['最低'] > 0)
+        negative_diff = (positive_diff == False)
     else:
         positive_diff = up_df['最高'] >= 0
         negative_diff = down_df['最低'] < 0
